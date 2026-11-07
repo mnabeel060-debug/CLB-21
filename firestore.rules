@@ -1,0 +1,155 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isOwnerEmail() {
+      return isSignedIn() &&
+             request.auth.token.email_verified == true &&
+             request.auth.token.email == 'mnabeel060@gmail.com';
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        isOwnerEmail() ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidAdmin(data) {
+      return data.userId is string &&
+             data.userId == request.auth.uid &&
+             data.email is string &&
+             data.email.size() > 0 &&
+             data.email.size() <= 100 &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time;
+    }
+
+    function isValidTransaction(data) {
+      return data.type in ['CASH_IN', 'CASH_OUT'] &&
+             data.date is string &&
+             data.date.size() > 0 &&
+             data.date.size() <= 30 &&
+             data.amount is number &&
+             data.amount > 0 &&
+             data.description is string &&
+             data.description.size() > 0 &&
+             data.description.size() <= 1000 &&
+             data.hasReceipt is bool &&
+             (!('receiptFileName' in data) || data.receiptFileName == null || (data.receiptFileName is string && data.receiptFileName.size() <= 200)) &&
+             (!('receiptMimeType' in data) || data.receiptMimeType == null || (data.receiptMimeType is string && data.receiptMimeType.size() <= 100)) &&
+             data.createdBy is string &&
+             data.createdBy == request.auth.uid &&
+             (!('createdByEmail' in data) || data.createdByEmail == null || (data.createdByEmail is string && data.createdByEmail.size() <= 100)) &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             (!('updatedAt' in data) || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidReceipt(data) {
+      return data.transactionId is string &&
+             data.transactionId.size() > 0 &&
+             data.transactionId.size() <= 128 &&
+             data.fileName is string &&
+             data.fileName.size() > 0 &&
+             data.fileName.size() <= 200 &&
+             data.mimeType is string &&
+             data.mimeType.size() > 0 &&
+             data.mimeType.size() <= 100 &&
+             data.base64Data is string &&
+             data.base64Data.size() > 0 &&
+             data.base64Data.size() <= 900000 &&
+             data.uploadedBy is string &&
+             data.uploadedBy == request.auth.uid &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             (!('updatedAt' in data) || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    // Admins Collection
+    match /admins/{userId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       userId == request.auth.uid &&
+                       (isOwnerEmail() || !exists(/databases/$(database)/documents/admins/$(request.auth.uid))) &&
+                       isValidAdmin(incoming()) &&
+                       incoming().keys().hasAll(['userId', 'email', 'createdAt']) &&
+                       incoming().keys().hasOnly(['userId', 'email', 'createdAt']);
+      allow update, delete: if isOwnerEmail();
+    }
+
+    // Transactions Collection
+    match /transactions/{transactionId} {
+      // Both Admin and Viewer roles can read transactions
+      allow get, list: if isSignedIn();
+
+      // Only Admin can create, update, or delete transactions
+      allow create: if isSignedIn() &&
+                       isValidId(transactionId) &&
+                       isAdmin() &&
+                       isValidTransaction(incoming()) &&
+                       incoming().keys().hasAll(['type', 'date', 'amount', 'description', 'hasReceipt', 'createdBy', 'createdAt']) &&
+                       incoming().keys().hasOnly(['type', 'date', 'amount', 'description', 'hasReceipt', 'receiptFileName', 'receiptMimeType', 'createdBy', 'createdByEmail', 'createdAt', 'updatedAt']);
+
+      allow update: if isSignedIn() &&
+                       isValidId(transactionId) &&
+                       isAdmin() &&
+                       isValidTransaction(incoming()) &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().createdBy == existing().createdBy &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['type', 'date', 'amount', 'description', 'hasReceipt', 'receiptFileName', 'receiptMimeType', 'createdByEmail', 'updatedAt']);
+
+      allow delete: if isSignedIn() &&
+                       isValidId(transactionId) &&
+                       isAdmin();
+    }
+
+    // Receipts Collection
+    match /receipts/{receiptId} {
+      // Both Admin and Viewer roles can read and download receipts
+      allow get, list: if isSignedIn();
+
+      // Only Admin can create, update, or delete receipts
+      allow create: if isSignedIn() &&
+                       isValidId(receiptId) &&
+                       isAdmin() &&
+                       isValidReceipt(incoming()) &&
+                       incoming().keys().hasAll(['transactionId', 'fileName', 'mimeType', 'base64Data', 'uploadedBy', 'createdAt']) &&
+                       incoming().keys().hasOnly(['transactionId', 'fileName', 'mimeType', 'base64Data', 'uploadedBy', 'createdAt', 'updatedAt']);
+
+      allow update: if isSignedIn() &&
+                       isValidId(receiptId) &&
+                       isAdmin() &&
+                       isValidReceipt(incoming()) &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().uploadedBy == existing().uploadedBy &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['fileName', 'mimeType', 'base64Data', 'updatedAt']);
+
+      allow delete: if isSignedIn() &&
+                       isValidId(receiptId) &&
+                       isAdmin();
+    }
+  }
+}
