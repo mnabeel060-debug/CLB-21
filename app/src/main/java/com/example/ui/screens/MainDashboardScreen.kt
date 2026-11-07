@@ -134,10 +134,14 @@ fun MainDashboardScreen(
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
-    LaunchedEffect(state.errorMessage) {
+    LaunchedEffect(state.errorMessage, state.successMessage) {
         state.errorMessage?.let { msg ->
             snackbarHostState.showSnackbar(msg)
-            viewModel.clearError()
+            viewModel.clearMessages()
+        }
+        state.successMessage?.let { msg ->
+            snackbarHostState.showSnackbar(msg)
+            viewModel.clearMessages()
         }
     }
 

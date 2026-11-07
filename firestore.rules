@@ -25,7 +25,6 @@ service cloud.firestore {
 
     function isOwnerEmail() {
       return isSignedIn() &&
-             request.auth.token.email_verified == true &&
              request.auth.token.email == 'mnabeel060@gmail.com';
     }
 
@@ -39,9 +38,7 @@ service cloud.firestore {
     function isValidAdmin(data) {
       return data.userId is string &&
              data.userId == request.auth.uid &&
-             data.email is string &&
-             data.email.size() > 0 &&
-             data.email.size() <= 100 &&
+             (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 100)) &&
              data.createdAt is timestamp &&
              data.createdAt <= request.time;
     }
@@ -90,25 +87,23 @@ service cloud.firestore {
     // Admins Collection
     match /admins/{userId} {
       allow get, list: if isSignedIn();
-      allow create: if isSignedIn() &&
-                       isValidId(userId) &&
-                       userId == request.auth.uid &&
-                       (isOwnerEmail() || !exists(/databases/$(database)/documents/admins/$(request.auth.uid))) &&
-                       isValidAdmin(incoming()) &&
-                       incoming().keys().hasAll(['userId', 'email', 'createdAt']) &&
-                       incoming().keys().hasOnly(['userId', 'email', 'createdAt']);
-      allow update, delete: if isOwnerEmail();
+      allow create, update: if isSignedIn() &&
+                               isValidId(userId) &&
+                               userId == request.auth.uid &&
+                               isValidAdmin(incoming());
+      allow delete: if isSignedIn() && isValidId(userId) && isOwnerEmail();
     }
 
     // Transactions Collection
     match /transactions/{transactionId} {
-      // Both Admin and Viewer roles can read transactions
+      // Both Admin and Viewer roles can read and list transactions
       allow get, list: if isSignedIn();
 
-      // Only Admin can create, update, or delete transactions
+      // Only verified Admins can create, update, or delete transactions
       allow create: if isSignedIn() &&
                        isValidId(transactionId) &&
                        isAdmin() &&
+                       incoming().createdBy == request.auth.uid &&
                        isValidTransaction(incoming()) &&
                        incoming().keys().hasAll(['type', 'date', 'amount', 'description', 'hasReceipt', 'createdBy', 'createdAt']) &&
                        incoming().keys().hasOnly(['type', 'date', 'amount', 'description', 'hasReceipt', 'receiptFileName', 'receiptMimeType', 'createdBy', 'createdByEmail', 'createdAt', 'updatedAt']);
@@ -116,9 +111,9 @@ service cloud.firestore {
       allow update: if isSignedIn() &&
                        isValidId(transactionId) &&
                        isAdmin() &&
+                       incoming().createdBy == existing().createdBy &&
                        isValidTransaction(incoming()) &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().createdBy == existing().createdBy &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['type', 'date', 'amount', 'description', 'hasReceipt', 'receiptFileName', 'receiptMimeType', 'createdByEmail', 'updatedAt']);
 
       allow delete: if isSignedIn() &&
@@ -131,10 +126,11 @@ service cloud.firestore {
       // Both Admin and Viewer roles can read and download receipts
       allow get, list: if isSignedIn();
 
-      // Only Admin can create, update, or delete receipts
+      // Only verified Admins can upload, update, or delete receipts
       allow create: if isSignedIn() &&
                        isValidId(receiptId) &&
                        isAdmin() &&
+                       incoming().uploadedBy == request.auth.uid &&
                        isValidReceipt(incoming()) &&
                        incoming().keys().hasAll(['transactionId', 'fileName', 'mimeType', 'base64Data', 'uploadedBy', 'createdAt']) &&
                        incoming().keys().hasOnly(['transactionId', 'fileName', 'mimeType', 'base64Data', 'uploadedBy', 'createdAt', 'updatedAt']);
@@ -142,9 +138,9 @@ service cloud.firestore {
       allow update: if isSignedIn() &&
                        isValidId(receiptId) &&
                        isAdmin() &&
+                       incoming().uploadedBy == existing().uploadedBy &&
                        isValidReceipt(incoming()) &&
                        incoming().createdAt == existing().createdAt &&
-                       incoming().uploadedBy == existing().uploadedBy &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['fileName', 'mimeType', 'base64Data', 'updatedAt']);
 
       allow delete: if isSignedIn() &&

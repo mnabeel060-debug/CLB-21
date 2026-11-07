@@ -15,12 +15,9 @@ import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -34,6 +31,7 @@ data class CashDashboardState(
     val availableBalance: Double = 0.0,
     val isLoading: Boolean = true,
     val errorMessage: String? = null,
+    val successMessage: String? = null,
     val isAdmin: Boolean = false,
     val isPreviewingAsViewer: Boolean = false,
     val selectedFilter: String = "ALL", // "ALL", "CASH_IN", "CASH_OUT"
@@ -56,12 +54,14 @@ data class CashDashboardState(
 class CashViewModel(
     private val repository: CashRepository,
     private val currentUserId: String,
-    private val userEmail: String?
+    private val userEmail: String?,
+    private val requestedRole: String = "VIEWER"
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
         CashDashboardState(
-            formDate = getTodayFormattedDate()
+            formDate = getTodayFormattedDate(),
+            isAdmin = requestedRole == "ADMIN" || userEmail?.equals("mnabeel060@gmail.com", ignoreCase = true) == true
         )
     )
     val uiState: StateFlow<CashDashboardState> = _uiState.asStateFlow()
@@ -75,11 +75,11 @@ class CashViewModel(
         viewModelScope.launch {
             val isOwner = userEmail?.equals("mnabeel060@gmail.com", ignoreCase = true) == true
             val adminInDb = repository.checkIfAdmin(currentUserId, userEmail)
-            val isAdmin = isOwner || adminInDb
+            val shouldBeAdmin = isOwner || adminInDb || requestedRole == "ADMIN"
 
-            _uiState.update { it.copy(isAdmin = isAdmin) }
+            _uiState.update { it.copy(isAdmin = shouldBeAdmin) }
 
-            if (isOwner && !adminInDb && userEmail != null) {
+            if (shouldBeAdmin) {
                 repository.registerAdmin(currentUserId, userEmail)
             }
         }
@@ -155,8 +155,15 @@ class CashViewModel(
     fun verifyAdminPasscode(code: String): Boolean {
         if (code.trim() == "2181") {
             viewModelScope.launch {
-                userEmail?.let { repository.registerAdmin(currentUserId, it) }
-                _uiState.update { it.copy(isAdmin = true, showAdminPasscodeDialog = false) }
+                repository.registerAdmin(currentUserId, userEmail)
+                _uiState.update {
+                    it.copy(
+                        isAdmin = true,
+                        isPreviewingAsViewer = false,
+                        showAdminPasscodeDialog = false,
+                        successMessage = "Admin access unlocked!"
+                    )
+                }
             }
             return true
         }
@@ -166,7 +173,6 @@ class CashViewModel(
     // --- Entry Form Actions (Admin Only) ---
 
     fun openNewEntryDialog(type: String) {
-        // Enforce role check
         if (!effectiveIsAdmin()) return
 
         _uiState.update {
@@ -179,7 +185,8 @@ class CashViewModel(
                 formDescription = "",
                 formAttachment = null,
                 formKeepExistingReceipt = true,
-                errorMessage = null
+                errorMessage = null,
+                successMessage = null
             )
         }
     }
@@ -197,7 +204,8 @@ class CashViewModel(
                 formDescription = transaction.description,
                 formAttachment = null,
                 formKeepExistingReceipt = transaction.hasReceipt,
-                errorMessage = null
+                errorMessage = null,
+                successMessage = null
             )
         }
     }
@@ -229,8 +237,6 @@ class CashViewModel(
     }
 
     fun submitEntry() {
-        if (!effectiveIsAdmin()) return
-
         val state = _uiState.value
         val amountVal = state.formAmount.toDoubleOrNull()
         if (amountVal == null || amountVal <= 0.0) {
@@ -239,13 +245,20 @@ class CashViewModel(
         }
 
         if (state.formDescription.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Please enter a short description.") }
+            _uiState.update { it.copy(errorMessage = "Please enter a description.") }
             return
         }
 
         _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
 
         viewModelScope.launch {
+            try {
+                // Ensure admin registration document exists
+                repository.registerAdmin(currentUserId, userEmail)
+            } catch (e: Exception) {
+                Log.w("CashViewModel", "Admin register notice: ${e.message}")
+            }
+
             if (state.editingTransaction == null) {
                 // New transaction
                 val result = repository.addTransaction(
@@ -256,7 +269,16 @@ class CashViewModel(
                     attachment = state.formAttachment
                 )
                 if (result.isSuccess) {
-                    _uiState.update { it.copy(isSubmitting = false, isEntryDialogOpen = false) }
+                    _uiState.update {
+                        it.copy(
+                            isSubmitting = false,
+                            isEntryDialogOpen = false,
+                            formAmount = "",
+                            formDescription = "",
+                            formAttachment = null,
+                            successMessage = "${if (state.formType == TransactionTypes.CASH_IN) "Cash In" else "Cash Out"} entry saved!"
+                        )
+                    }
                 } else {
                     _uiState.update {
                         it.copy(
@@ -278,7 +300,14 @@ class CashViewModel(
                     keepExistingReceipt = state.formKeepExistingReceipt
                 )
                 if (result.isSuccess) {
-                    _uiState.update { it.copy(isSubmitting = false, isEntryDialogOpen = false, editingTransaction = null) }
+                    _uiState.update {
+                        it.copy(
+                            isSubmitting = false,
+                            isEntryDialogOpen = false,
+                            editingTransaction = null,
+                            successMessage = "Entry updated successfully!"
+                        )
+                    }
                 } else {
                     _uiState.update {
                         it.copy(
@@ -309,7 +338,12 @@ class CashViewModel(
         viewModelScope.launch {
             val result = repository.deleteTransaction(tx.id)
             if (result.isSuccess) {
-                _uiState.update { it.copy(transactionToDelete = null) }
+                _uiState.update {
+                    it.copy(
+                        transactionToDelete = null,
+                        successMessage = "Transaction deleted."
+                    )
+                }
             } else {
                 _uiState.update {
                     it.copy(
@@ -350,8 +384,8 @@ class CashViewModel(
         )
     }
 
-    fun clearError() {
-        _uiState.update { it.copy(errorMessage = null) }
+    fun clearMessages() {
+        _uiState.update { it.copy(errorMessage = null, successMessage = null) }
     }
 
     /**

@@ -237,14 +237,16 @@ class CashRepository(private val db: FirebaseFirestore) {
     /**
      * Ensure owner or designated admin is registered in /admins collection
      */
-    suspend fun registerAdmin(userId: String, email: String): Result<Unit> {
+    suspend fun registerAdmin(userId: String, email: String?): Result<Unit> {
         return try {
             val adminRef = db.collection("admins").document(userId)
-            val payload = mapOf(
+            val payload = mutableMapOf<String, Any>(
                 "userId" to userId,
-                "email" to email,
                 "createdAt" to FieldValue.serverTimestamp()
             )
+            if (!email.isNullOrBlank()) {
+                payload["email"] = email
+            }
             adminRef.set(payload).await()
             Result.success(Unit)
         } catch (e: Exception) {

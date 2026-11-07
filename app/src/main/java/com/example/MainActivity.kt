@@ -70,10 +70,13 @@ fun AppRoot() {
         }
     }
 
+    var selectedRole by remember { mutableStateOf("VIEWER") }
+
     val user = currentUser
     if (user == null) {
         AuthScreen(
-            onAuthSuccess = {
+            onAuthSuccess = { role ->
+                selectedRole = role
                 currentUser = auth.currentUser
             }
         )
@@ -81,7 +84,7 @@ fun AppRoot() {
         key(user.uid) {
             val databaseId = context.getString(R.string.firestore_database_id)
             val cashViewModel: CashViewModel = viewModel(
-                key = user.uid,
+                key = "${user.uid}_$selectedRole",
                 factory = viewModelFactory {
                     initializer {
                         val db = FirebaseFirestore.getInstance(databaseId)
@@ -89,7 +92,8 @@ fun AppRoot() {
                         CashViewModel(
                             repository = repository,
                             currentUserId = user.uid,
-                            userEmail = user.email
+                            userEmail = user.email,
+                            requestedRole = selectedRole
                         )
                     }
                 }
