@@ -19,7 +19,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
-import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -70,13 +69,10 @@ fun AppRoot() {
         }
     }
 
-    var selectedRole by remember { mutableStateOf("VIEWER") }
-
     val user = currentUser
     if (user == null) {
         AuthScreen(
-            onAuthSuccess = { role ->
-                selectedRole = role
+            onAuthSuccess = {
                 currentUser = auth.currentUser
             }
         )
@@ -84,7 +80,7 @@ fun AppRoot() {
         key(user.uid) {
             val databaseId = context.getString(R.string.firestore_database_id)
             val cashViewModel: CashViewModel = viewModel(
-                key = "${user.uid}_$selectedRole",
+                key = user.uid,
                 factory = viewModelFactory {
                     initializer {
                         val db = FirebaseFirestore.getInstance(databaseId)
@@ -92,8 +88,7 @@ fun AppRoot() {
                         CashViewModel(
                             repository = repository,
                             currentUserId = user.uid,
-                            userEmail = user.email,
-                            requestedRole = selectedRole
+                            userEmail = user.email
                         )
                     }
                 }

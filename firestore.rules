@@ -43,7 +43,7 @@ service cloud.firestore {
              data.createdAt <= request.time;
     }
 
-    function isValidTransaction(data) {
+    function isValidTransactionFields(data) {
       return data.type in ['CASH_IN', 'CASH_OUT'] &&
              data.date is string &&
              data.date.size() > 0 &&
@@ -57,7 +57,6 @@ service cloud.firestore {
              (!('receiptFileName' in data) || data.receiptFileName == null || (data.receiptFileName is string && data.receiptFileName.size() <= 200)) &&
              (!('receiptMimeType' in data) || data.receiptMimeType == null || (data.receiptMimeType is string && data.receiptMimeType.size() <= 100)) &&
              data.createdBy is string &&
-             data.createdBy == request.auth.uid &&
              (!('createdByEmail' in data) || data.createdByEmail == null || (data.createdByEmail is string && data.createdByEmail.size() <= 100)) &&
              data.createdAt is timestamp &&
              data.createdAt <= request.time &&
@@ -78,7 +77,6 @@ service cloud.firestore {
              data.base64Data.size() > 0 &&
              data.base64Data.size() <= 900000 &&
              data.uploadedBy is string &&
-             data.uploadedBy == request.auth.uid &&
              data.createdAt is timestamp &&
              data.createdAt <= request.time &&
              (!('updatedAt' in data) || (data.updatedAt is timestamp && data.updatedAt <= request.time));
@@ -104,7 +102,7 @@ service cloud.firestore {
                        isValidId(transactionId) &&
                        isAdmin() &&
                        incoming().createdBy == request.auth.uid &&
-                       isValidTransaction(incoming()) &&
+                       isValidTransactionFields(incoming()) &&
                        incoming().keys().hasAll(['type', 'date', 'amount', 'description', 'hasReceipt', 'createdBy', 'createdAt']) &&
                        incoming().keys().hasOnly(['type', 'date', 'amount', 'description', 'hasReceipt', 'receiptFileName', 'receiptMimeType', 'createdBy', 'createdByEmail', 'createdAt', 'updatedAt']);
 
@@ -112,8 +110,8 @@ service cloud.firestore {
                        isValidId(transactionId) &&
                        isAdmin() &&
                        incoming().createdBy == existing().createdBy &&
-                       isValidTransaction(incoming()) &&
                        incoming().createdAt == existing().createdAt &&
+                       isValidTransactionFields(incoming()) &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['type', 'date', 'amount', 'description', 'hasReceipt', 'receiptFileName', 'receiptMimeType', 'createdByEmail', 'updatedAt']);
 
       allow delete: if isSignedIn() &&
@@ -138,7 +136,6 @@ service cloud.firestore {
       allow update: if isSignedIn() &&
                        isValidId(receiptId) &&
                        isAdmin() &&
-                       incoming().uploadedBy == existing().uploadedBy &&
                        isValidReceipt(incoming()) &&
                        incoming().createdAt == existing().createdAt &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['fileName', 'mimeType', 'base64Data', 'updatedAt']);

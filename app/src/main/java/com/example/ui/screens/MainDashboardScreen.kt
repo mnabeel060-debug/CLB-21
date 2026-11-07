@@ -30,7 +30,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Add
@@ -43,12 +42,13 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NorthEast
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.SouthWest
 import androidx.compose.material.icons.filled.Visibility
@@ -59,6 +59,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -68,7 +70,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -94,6 +95,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -102,7 +104,6 @@ import androidx.compose.ui.window.Dialog
 import com.example.data.model.Receipt
 import com.example.data.model.Transaction
 import com.example.data.model.TransactionTypes
-import com.example.ui.theme.AmberContainer
 import com.example.ui.theme.AmberLight
 import com.example.ui.theme.AmberPrimary
 import com.example.ui.theme.CashInContainer
@@ -113,13 +114,13 @@ import com.example.ui.theme.CashOutRed
 import com.example.ui.theme.CashOutRedLight
 import com.example.ui.theme.Slate100
 import com.example.ui.theme.Slate200
-import com.example.ui.theme.Slate50
 import com.example.ui.theme.Slate500
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import com.example.ui.viewmodel.CashViewModel
 import com.example.util.FileUtils
+import com.example.util.StatementGenerator
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -133,6 +134,7 @@ fun MainDashboardScreen(
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    var showMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.errorMessage, state.successMessage) {
         state.errorMessage?.let { msg ->
@@ -169,8 +171,8 @@ fun MainDashboardScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             val roleLabel = when {
-                                state.isPreviewingAsViewer -> "Previewing as Viewer"
-                                state.isAdmin -> "Admin (Owner)"
+                                state.isPreviewingAsViewer -> "Viewer Preview"
+                                state.isAdmin -> "Admin (Full Control)"
                                 else -> "Viewer (Read-Only)"
                             }
                             val roleColor = if (effectiveIsAdmin) AmberLight else CashInGreenLight
@@ -188,57 +190,118 @@ fun MainDashboardScreen(
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
-
-                            if (!userEmail.isNullOrBlank()) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "• $userEmail",
-                                    color = Slate200,
-                                    fontSize = 11.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
                         }
                     }
                 },
                 actions = {
-                    // If owner is logged in, allow toggling "Preview as Viewer"
-                    if (state.isAdmin) {
-                        IconButton(
-                            onClick = { viewModel.togglePreviewAsViewer() },
-                            modifier = Modifier.testTag("toggle_viewer_mode_button")
-                        ) {
-                            Icon(
-                                imageVector = if (state.isPreviewingAsViewer) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = if (state.isPreviewingAsViewer) "Exit Viewer Preview" else "Preview as Viewer",
-                                tint = if (state.isPreviewingAsViewer) AmberLight else Color.White
+                    // Action 1: Print / Download Statement PDF (Available to both Admin and Viewer)
+                    IconButton(
+                        onClick = {
+                            StatementGenerator.generateAndOpenStatementPdf(
+                                context = context,
+                                transactions = state.transactions,
+                                totalCashIn = state.totalCashIn,
+                                totalCashOut = state.totalCashOut,
+                                availableBalance = state.availableBalance
                             )
-                        }
-                    } else {
-                        // Allow entering site access key
+                        },
+                        modifier = Modifier.testTag("topbar_print_statement_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Print,
+                            contentDescription = "Print Statement PDF",
+                            tint = AmberLight
+                        )
+                    }
+
+                    // Action 2: Top-Right Overflow Menu
+                    Box {
                         IconButton(
-                            onClick = { viewModel.openAdminPasscodeDialog() },
-                            modifier = Modifier.testTag("admin_passcode_button")
+                            onClick = { showMenu = true },
+                            modifier = Modifier.testTag("topbar_menu_button")
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Key,
-                                contentDescription = "Enter Admin Key",
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Menu Options",
                                 tint = Color.White
                             )
                         }
-                    }
 
-                    // Sign Out
-                    IconButton(
-                        onClick = onSignOut,
-                        modifier = Modifier.testTag("sign_out_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Logout,
-                            contentDescription = "Sign Out",
-                            tint = Color.White
-                        )
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false },
+                            modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                        ) {
+                            // Option: Admin Access / Switch to Read-Only
+                            if (!state.isAdmin) {
+                                DropdownMenuItem(
+                                    text = { Text("Admin Access (Unlock)", fontWeight = FontWeight.SemiBold) },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Key, contentDescription = null, tint = AmberPrimary)
+                                    },
+                                    onClick = {
+                                        showMenu = false
+                                        viewModel.openAdminPasscodeDialog()
+                                    },
+                                    modifier = Modifier.testTag("menu_admin_access")
+                                )
+                            } else {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (state.isPreviewingAsViewer) "Exit Viewer Preview" else "Switch to Read-Only Mode",
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (state.isPreviewingAsViewer) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                            contentDescription = null,
+                                            tint = AmberPrimary
+                                        )
+                                    },
+                                    onClick = {
+                                        showMenu = false
+                                        viewModel.togglePreviewAsViewer()
+                                    },
+                                    modifier = Modifier.testTag("menu_toggle_viewer")
+                                )
+                            }
+
+                            // Option: Download / Print Statement PDF
+                            DropdownMenuItem(
+                                text = { Text("Download Statement (PDF)", fontWeight = FontWeight.Medium) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.PictureAsPdf, contentDescription = null, tint = CashInGreen)
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    StatementGenerator.generateAndOpenStatementPdf(
+                                        context = context,
+                                        transactions = state.transactions,
+                                        totalCashIn = state.totalCashIn,
+                                        totalCashOut = state.totalCashOut,
+                                        availableBalance = state.availableBalance
+                                    )
+                                },
+                                modifier = Modifier.testTag("menu_download_statement")
+                            )
+
+                            HorizontalDivider()
+
+                            // Option: Sign Out
+                            DropdownMenuItem(
+                                text = { Text("Sign Out", color = CashOutRed, fontWeight = FontWeight.SemiBold) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Logout, contentDescription = null, tint = CashOutRed)
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    onSignOut()
+                                },
+                                modifier = Modifier.testTag("menu_sign_out")
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -349,27 +412,27 @@ fun MainDashboardScreen(
                     Card(
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = Slate100
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
                         ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
                             modifier = Modifier
-                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                                .padding(horizontal = 14.dp, vertical = 12.dp)
                                 .fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Visibility,
                                 contentDescription = null,
-                                tint = Slate700,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = "Viewer Mode (Read-Only): You can view financial totals, transaction history, and download receipts.",
+                                text = "Viewer Mode (Read-Only): You can view all financial figures, download uploaded receipts, and export the complete statement.",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Slate700
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -377,13 +440,90 @@ fun MainDashboardScreen(
             }
 
             // ==========================================
-            // SECTION 3: TRANSACTION HISTORY
+            // SECTION 3: STATEMENT EXPORT BANNER FOR ALL USERS
+            // ==========================================
+            item {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    border = CardDefaults.outlinedCardBorder(),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(AmberLight.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PictureAsPdf,
+                                    contentDescription = null,
+                                    tint = AmberPrimary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Full Financial Statement",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Print or save itemized summary with subtotals",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                StatementGenerator.generateAndOpenStatementPdf(
+                                    context = context,
+                                    transactions = state.transactions,
+                                    totalCashIn = state.totalCashIn,
+                                    totalCashOut = state.totalCashOut,
+                                    availableBalance = state.availableBalance
+                                )
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Slate900,
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier.testTag("download_statement_button")
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Print / PDF", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                        }
+                    }
+                }
+            }
+
+            // ==========================================
+            // SECTION 4: TRANSACTION HISTORY
             // ==========================================
             item {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 8.dp),
+                        .padding(top = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -391,26 +531,26 @@ fun MainDashboardScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
                             contentDescription = null,
-                            tint = Slate900,
+                            tint = MaterialTheme.colorScheme.onBackground,
                             modifier = Modifier.size(22.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Transaction History",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Slate900
+                            color = MaterialTheme.colorScheme.onBackground
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Box(
                             modifier = Modifier
                                 .clip(CircleShape)
-                                .background(Slate200)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
                                 .padding(horizontal = 8.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = "${state.transactions.size}",
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = Slate800
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -534,7 +674,7 @@ fun MainDashboardScreen(
     }
 
     // ==========================================
-    // DIALOG 2: RECEIPT VIEWER & DOWNLOAD
+    // DIALOG 2: RECEIPT VIEWER & DOWNLOAD (Admin & Viewer)
     // ==========================================
     if (state.viewingReceipt != null) {
         ReceiptViewerDialog(
@@ -545,7 +685,7 @@ fun MainDashboardScreen(
     }
 
     // ==========================================
-    // DIALOG 3: DELETE CONFIRMATION
+    // DIALOG 3: DELETE CONFIRMATION (Admin Only)
     // ==========================================
     if (state.transactionToDelete != null && effectiveIsAdmin) {
         val tx = state.transactionToDelete!!
@@ -589,12 +729,13 @@ fun MainDashboardScreen(
     }
 
     // ==========================================
-    // DIALOG 4: ADMIN PASSCODE (For Testing/Site Team)
+    // DIALOG 4: CONFIDENTIAL ADMIN PASSCODE
+    // (NO HINTS, NO PLAINTEXT CODE ON SCREEN)
     // ==========================================
     if (state.showAdminPasscodeDialog) {
         AdminPasscodeDialog(
             onDismiss = { viewModel.dismissAdminPasscodeDialog() },
-            onVerify = { code -> viewModel.verifyAdminPasscode(code) }
+            onVerify = { code, onResult -> viewModel.verifyAdminPasscode(code, onResult) }
         )
     }
 }
@@ -795,7 +936,8 @@ private fun TransactionItemCard(
     Card(
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
+        border = CardDefaults.outlinedCardBorder(),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("transaction_card_${transaction.id}")
@@ -815,14 +957,14 @@ private fun TransactionItemCard(
                     Icon(
                         imageVector = Icons.Default.CalendarToday,
                         contentDescription = null,
-                        tint = Slate500,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = transaction.date,
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = Slate700
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
@@ -842,7 +984,7 @@ private fun TransactionItemCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Main Row: Amount & Description
+            // Main Row: Description (HIGH CONTRAST) & Amount
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -851,14 +993,18 @@ private fun TransactionItemCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = transaction.description,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = Slate900
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.2.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     if (!transaction.createdByEmail.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "By ${transaction.createdByEmail}",
+                            text = "Recorded by ${transaction.createdByEmail}",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Slate500
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -873,7 +1019,7 @@ private fun TransactionItemCard(
             }
 
             Spacer(modifier = Modifier.height(12.dp))
-            HorizontalDivider(color = Slate100, thickness = 1.dp)
+            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant, thickness = 1.dp)
             Spacer(modifier = Modifier.height(8.dp))
 
             // Footer: Receipt Download/View button & Admin Controls
@@ -887,7 +1033,7 @@ private fun TransactionItemCard(
                     Surface(
                         onClick = onViewReceipt,
                         shape = RoundedCornerShape(8.dp),
-                        color = Slate100,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier.testTag("view_receipt_button_${transaction.id}")
                     ) {
                         Row(
@@ -902,9 +1048,9 @@ private fun TransactionItemCard(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = transaction.receiptFileName ?: "View Receipt",
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = Slate800,
+                                text = transaction.receiptFileName ?: "Download Receipt",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -914,7 +1060,7 @@ private fun TransactionItemCard(
                     Text(
                         text = "No receipt attached",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Slate500
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
@@ -928,7 +1074,7 @@ private fun TransactionItemCard(
                             Icon(
                                 imageVector = Icons.Default.Edit,
                                 contentDescription = "Edit entry",
-                                tint = Slate700,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -1008,11 +1154,28 @@ private fun EntryFormDialog(
                     )
 
                     IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Slate500)
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
+
+                // In-dialog error message if any
+                if (!state.formError.isNullOrBlank()) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = state.formError ?: "",
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
 
                 // Date Input
                 OutlinedTextField(
@@ -1032,7 +1195,7 @@ private fun EntryFormDialog(
                 OutlinedTextField(
                     value = state.formAmount,
                     onValueChange = { onUpdateField(null, it, null, null, null) },
-                    label = { Text("Amount") },
+                    label = { Text("Amount (Rs)") },
                     placeholder = { Text("e.g. 50000") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
@@ -1058,7 +1221,7 @@ private fun EntryFormDialog(
                 Text(
                     text = "Receipt / Payment Slip / Bill",
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                    color = Slate700
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(6.dp))
 
@@ -1074,7 +1237,7 @@ private fun EntryFormDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
-                            .background(Slate100)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
@@ -1113,7 +1276,6 @@ private fun EntryFormDialog(
                 } else {
                     OutlinedButton(
                         onClick = {
-                            // Support images and PDF documents
                             filePickerLauncher.launch("*/*")
                         },
                         shape = RoundedCornerShape(10.dp),
@@ -1205,19 +1367,19 @@ private fun ReceiptViewerDialog(
                         Text(
                             text = "Uploaded Receipt",
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                            color = Slate900
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = receipt.fileName,
                             style = MaterialTheme.typography.bodySmall,
-                            color = Slate500,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
 
                     IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Slate500)
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 
@@ -1229,7 +1391,7 @@ private fun ReceiptViewerDialog(
                         .fillMaxWidth()
                         .heightIn(min = 180.dp, max = 320.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Slate100)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
                         .border(1.dp, Slate200, RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center
                 ) {
@@ -1262,7 +1424,7 @@ private fun ReceiptViewerDialog(
                             Text(
                                 text = "Document (${receipt.mimeType})",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Slate500
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -1293,56 +1455,85 @@ private fun ReceiptViewerDialog(
 }
 
 // --------------------------------------------------------------------------------
-// ADMIN PASSCODE DIALOG (Site Access Code "2181")
+// ADMIN PASSCODE DIALOG (Site Access Code - NO HINTS ON SCREEN, MASKED PASSWORD)
 // --------------------------------------------------------------------------------
 
 @Composable
 private fun AdminPasscodeDialog(
     onDismiss: () -> Unit,
-    onVerify: (String) -> Boolean
+    onVerify: (String, (Boolean) -> Unit) -> Unit
 ) {
     var code by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var isChecking by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = {
-            Icon(Icons.Default.Key, contentDescription = null, tint = AmberPrimary, modifier = Modifier.size(32.dp))
+            Icon(Icons.Default.Lock, contentDescription = null, tint = AmberPrimary, modifier = Modifier.size(32.dp))
         },
-        title = { Text("Site Admin Verification", fontWeight = FontWeight.Bold) },
+        title = {
+            Text(
+                text = "Admin Access Verification",
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+        },
         text = {
             Column {
-                Text("Enter the CLB 21 Eighteen Society Rawalpindi site management passcode to unlock Admin privileges.")
-                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Enter your confidential admin security passcode to unlock Cash In & Out management.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(14.dp))
                 OutlinedTextField(
                     value = code,
                     onValueChange = {
                         code = it
                         error = null
                     },
-                    label = { Text("Passcode") },
-                    placeholder = { Text("2181") },
+                    label = { Text("Security Passcode") },
                     singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     isError = error != null,
                     modifier = Modifier.fillMaxWidth().testTag("admin_passcode_input")
                 )
                 if (error != null) {
-                    Text(error ?: "", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        text = error ?: "",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
                 }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    val ok = onVerify(code)
-                    if (!ok) {
-                        error = "Invalid passcode. Hint: 2181"
+                    isChecking = true
+                    error = null
+                    onVerify(code) { success ->
+                        isChecking = false
+                        if (!success) {
+                            error = "Incorrect passcode. Please try again."
+                        }
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = Slate900)
+                enabled = !isChecking && code.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(containerColor = Slate900),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.testTag("admin_passcode_verify_button")
             ) {
-                Text("Verify")
+                if (isChecking) {
+                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Verifying...")
+                } else {
+                    Text("Unlock Admin", color = Color.White)
+                }
             }
         },
         dismissButton = {

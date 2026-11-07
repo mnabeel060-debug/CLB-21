@@ -5,7 +5,6 @@ import android.content.Context
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,15 +20,11 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Construction
-import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -37,11 +32,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,7 +47,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -67,7 +58,6 @@ import com.example.R
 import com.example.ui.theme.AmberLight
 import com.example.ui.theme.AmberPrimary
 import com.example.ui.theme.CashInGreen
-import com.example.ui.theme.CashOutRed
 import com.example.ui.theme.Slate100
 import com.example.ui.theme.Slate200
 import com.example.ui.theme.Slate700
@@ -85,15 +75,13 @@ import kotlinx.coroutines.tasks.await
 
 @Composable
 fun AuthScreen(
-    onAuthSuccess: (selectedRole: String) -> Unit
+    onAuthSuccess: () -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val credentialManager = remember { CredentialManager.create(context) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var pendingRole by remember { mutableStateOf("VIEWER") }
-    var showPinDialog by remember { mutableStateOf(false) }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -109,7 +97,7 @@ fun AuthScreen(
         ) {
             Box(
                 modifier = Modifier
-                    .widthIn(max = 480.dp)
+                    .widthIn(max = 440.dp)
                     .fillMaxWidth(),
                 contentAlignment = Alignment.Center
             ) {
@@ -120,20 +108,21 @@ fun AuthScreen(
                     // Construction Emblem
                     Box(
                         modifier = Modifier
-                            .size(80.dp)
-                            .clip(RoundedCornerShape(22.dp))
-                            .background(Slate900),
+                            .size(90.dp)
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(Slate900)
+                            .border(2.dp, AmberPrimary.copy(alpha = 0.5f), RoundedCornerShape(24.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.Construction,
                             contentDescription = "CLB 21 Eighteen Society",
                             tint = AmberPrimary,
-                            modifier = Modifier.size(44.dp)
+                            modifier = Modifier.size(50.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
 
                     Text(
                         text = "CLB 21 Eighteen Society",
@@ -145,7 +134,7 @@ fun AuthScreen(
                         textAlign = TextAlign.Center
                     )
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
                         text = "Rawalpindi • Cash Management Portal",
@@ -168,18 +157,34 @@ fun AuthScreen(
                                 text = errorMessage ?: "",
                                 color = MaterialTheme.colorScheme.onErrorContainer,
                                 style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.padding(12.dp),
+                                modifier = Modifier.padding(14.dp),
                                 textAlign = TextAlign.Center
                             )
                         }
                         Spacer(modifier = Modifier.height(20.dp))
                     }
 
-                    // DOOR 1: OWNER / ADMIN ACCESS (Full Control)
+                    // Single, Clean "Sign in with Google" button
                     Button(
                         onClick = {
-                            pendingRole = "ADMIN"
-                            showPinDialog = true
+                            isLoading = true
+                            errorMessage = null
+                            performGoogleSignIn(
+                                context = context,
+                                credentialManager = credentialManager,
+                                scope = coroutineScope,
+                                onAuthSuccess = {
+                                    isLoading = false
+                                    onAuthSuccess()
+                                },
+                                onAuthError = { err ->
+                                    isLoading = false
+                                    errorMessage = err
+                                },
+                                onAuthCancelled = {
+                                    isLoading = false
+                                }
+                            )
                         },
                         enabled = !isLoading,
                         shape = RoundedCornerShape(14.dp),
@@ -187,209 +192,70 @@ fun AuthScreen(
                             containerColor = Slate900,
                             contentColor = Color.White
                         ),
+                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(58.dp)
-                            .testTag("admin_portal_login_button")
+                            .height(56.dp)
+                            .testTag("google_sign_in_button")
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.AdminPanelSettings,
-                            contentDescription = null,
-                            tint = AmberPrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(horizontalAlignment = Alignment.Start) {
-                            Text(
-                                text = "Admin Login (Full Control)",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                            )
-                            Text(
-                                text = "Manage Cash In & Cash Out",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Slate200
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // DOOR 2: VIEWER ACCESS (Read-Only)
-                    OutlinedButton(
-                        onClick = {
-                            pendingRole = "VIEWER"
-                            isLoading = true
-                            errorMessage = null
-                            performGoogleSignIn(
-                                context = context,
-                                credentialManager = credentialManager,
-                                scope = coroutineScope,
-                                onAuthSuccess = {
-                                    isLoading = false
-                                    onAuthSuccess("VIEWER")
-                                },
-                                onAuthError = { err ->
-                                    isLoading = false
-                                    errorMessage = err
-                                },
-                                onAuthCancelled = {
-                                    isLoading = false
-                                }
-                            )
-                        },
-                        enabled = !isLoading,
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = Slate900
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(58.dp)
-                            .testTag("viewer_portal_login_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Visibility,
-                            contentDescription = null,
-                            tint = CashInGreen,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(horizontalAlignment = Alignment.Start) {
-                            Text(
-                                text = "Viewer Login (Read-Only)",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = Slate900
-                            )
-                            Text(
-                                text = "View Balance & Download Receipts",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Slate700
-                            )
-                        }
-                    }
-
-                    if (isLoading) {
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (isLoading) {
                             CircularProgressIndicator(
                                 color = AmberPrimary,
                                 strokeWidth = 2.dp,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(22.dp)
                             )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text("Authenticating securely...", style = MaterialTheme.typography.bodySmall)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "Signing in...",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                        } else {
+                            // Google 'G' icon representation / lock icon
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "G",
+                                    color = Slate900,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 16.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Text(
+                                text = "Sign in with Google",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = Color.White
+                            )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(36.dp))
+                    Spacer(modifier = Modifier.height(32.dp))
 
-                    Text(
-                        text = "CLB 21 Eighteen Society Rawalpindi • Secure Financial Ledger",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-        }
-    }
-
-    // Passcode dialog to verify Admin authority before logging into full control
-    if (showPinDialog) {
-        var pinInput by remember { mutableStateOf("") }
-        var pinError by remember { mutableStateOf<String?>(null) }
-
-        AlertDialog(
-            onDismissRequest = { showPinDialog = false },
-            icon = {
-                Icon(
-                    imageVector = Icons.Default.Key,
-                    contentDescription = null,
-                    tint = AmberPrimary,
-                    modifier = Modifier.size(32.dp)
-                )
-            },
-            title = {
-                Text(
-                    text = "Admin Access Verification",
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
-                )
-            },
-            text = {
-                Column {
-                    Text(
-                        text = "Enter the Master Admin PIN for CLB 21 Eighteen Society to unlock Cash In & Out management.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-                    OutlinedTextField(
-                        value = pinInput,
-                        onValueChange = {
-                            pinInput = it
-                            pinError = null
-                        },
-                        label = { Text("Admin PIN") },
-                        placeholder = { Text("2181") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        isError = pinError != null,
-                        modifier = Modifier.fillMaxWidth().testTag("admin_login_pin_input")
-                    )
-                    if (pinError != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = CashInGreen,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = pinError ?: "",
-                            color = MaterialTheme.colorScheme.error,
+                            text = "Cloud Ledger • CLB 21 Eighteen Society Rawalpindi",
                             style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(top = 4.dp)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val currentAuthEmail = Firebase.auth.currentUser?.email
-                        val isOwner = currentAuthEmail?.equals("mnabeel060@gmail.com", ignoreCase = true) == true
-                        val isCorrectPin = pinInput.trim() == "2181"
-
-                        if (isCorrectPin || isOwner) {
-                            showPinDialog = false
-                            isLoading = true
-                            errorMessage = null
-                            performGoogleSignIn(
-                                context = context,
-                                credentialManager = credentialManager,
-                                scope = coroutineScope,
-                                onAuthSuccess = {
-                                    isLoading = false
-                                    onAuthSuccess("ADMIN")
-                                },
-                                onAuthError = { err ->
-                                    isLoading = false
-                                    errorMessage = err
-                                },
-                                onAuthCancelled = {
-                                    isLoading = false
-                                }
-                            )
-                        } else {
-                            pinError = "Incorrect PIN. (Hint: 2181)"
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Slate900),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.testTag("admin_pin_confirm_button")
-                ) {
-                    Text("Unlock Admin", color = Color.White)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showPinDialog = false }) {
-                    Text("Cancel")
-                }
             }
-        )
+        }
     }
 }
 
